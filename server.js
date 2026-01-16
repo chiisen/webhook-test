@@ -9,6 +9,7 @@ const COLORS = {
   GREEN: "\x1b[32m",
   YELLOW: "\x1b[33m",
   RED: "\x1b[31m",
+  MAGENTA: "\x1b[35m",
   DIM: "\x1b[2m"
 };
 
@@ -25,6 +26,9 @@ app.post('/test', (req, res) => {
   console.log(`${COLORS.YELLOW}🚀 收到 Grafana 通知:${COLORS.RESET}`);
   // console.dir supports colored output natively
   console.dir(req.body, { depth: null, colors: true });
+
+  const endTimestamp = new Date().toISOString();
+  console.log(`${COLORS.MAGENTA}⏱️  接收完成時間: ${endTimestamp}${COLORS.RESET}\n`);
 
   res.status(200).send('OK');
 });
