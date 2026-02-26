@@ -48,6 +48,10 @@ PORT=3000 node server.js
 # 伺服器監聽埠口 (預設: 9999)
 PORT=9999
 
+# API Token 驗證 (可選)
+# 在請求時須加上 Header: X-API-TOKEN
+API_TOKEN=your-secret-token
+
 # 警報音效設定 (僅 macOS 有效)
 # 預設: Glass
 ALERT_SOUND=Glass
@@ -57,6 +61,15 @@ ALERT_SOUND=Glass
 # 預設: 0.5
 ALERT_VOLUME=0.5
 ```
+
+### 🔐 API Token 驗證
+若設定了 `API_TOKEN`，請求 `/test` 端點時須在 Header 加入 Token：
+```bash
+curl -X POST http://localhost:9999/test \
+  -H "X-API-TOKEN: your-secret-token" \
+  -d '{}'
+```
+未提供正確 Token 時會收到 `401 Unauthorized`。
 
 ### 🎵 可用音效列表 (macOS)
 您可以將 `ALERT_SOUND` 設定為以下任一值：
