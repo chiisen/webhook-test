@@ -25,6 +25,8 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
+
 app.post('/test', (req, res) => {
   console.log(`${COLORS.YELLOW}🚀 收到 Grafana 通知:${COLORS.RESET}`);
   // console.dir supports colored output natively
