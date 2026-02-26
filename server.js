@@ -20,6 +20,13 @@ const COLORS = {
 
 app.use(express.json());
 
+// Statistics
+const stats = {
+  totalRequests: 0,
+  blockedRequests: 0,
+  startTime: Date.now()
+};
+
 // Rate Limiting
 const rateLimitStore = {};
 setInterval(() => {
@@ -31,7 +38,8 @@ const rateLimit = (req, res, next) => {
   rateLimitStore[ip] = (rateLimitStore[ip] || 0) + 1;
   
   if (rateLimitStore[ip] > RATE_LIMIT) {
-    console.log(`${COLORS.RED}🚫 請求被阻擋 - 超過限流次數${COLORS.RESET} | IP: ${ip} | 次數: ${rateLimitStore[ip]}/${RATE_LIMIT}/分鐘`);
+    stats.blockedRequests++;
+    console.log(`${COLORS.RED}🚫 請求被阻擋 - 超過限流次數${COL} | IP:ORS.RESET ${ip} | 次數: ${rateLimitStore[ip]}/${RATE_LIMIT}/分鐘`);
     return res.status(429).json({ error: 'Too Many Requests' });
   }
   
@@ -69,7 +77,17 @@ app.use((req, res, next) => {
 
 app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
 
+app.get('/stats', (req, res) => {
+  const uptime = Math.floor((Date.now() - stats.startTime) / 1000);
+  res.status(200).json({
+    totalRequests: stats.totalRequests,
+    blockedRequests: stats.blockedRequests,
+    uptimeSeconds: uptime
+  });
+});
+
 app.post('/test', rateLimit, validateToken, (req, res) => {
+  stats.totalRequests++;
   console.log(`${COLORS.YELLOW}🚀 收到 Grafana 通知:${COLORS.RESET}`);
   console.dir(req.body, { depth: null, colors: true });
 
