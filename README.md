@@ -52,6 +52,9 @@ PORT=9999
 # 在請求時須加上 Header: X-API-TOKEN
 API_TOKEN=your-secret-token
 
+# Rate Limit (每分鐘最多請求次數，預設: 60)
+# RATE_LIMIT=60
+
 # 警報音效設定 (僅 macOS 有效)
 # 預設: Glass
 ALERT_SOUND=Glass

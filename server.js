@@ -4,6 +4,7 @@ const { exec } = require('child_process');
 const crypto = require('crypto');
 const app = express();
 const PORT = process.env.PORT || 9999;
+const RATE_LIMIT = parseInt(process.env.RATE_LIMIT || '60');
 
 // ANSI Color Codes
 const COLORS = {
@@ -18,6 +19,28 @@ const COLORS = {
 };
 
 app.use(express.json());
+
+// Rate Limiting
+const rateLimitStore = {};
+setInterval(() => {
+  Object.keys(rateLimitStore).forEach(ip => rateLimitStore[ip] = 0);
+}, 60000);
+
+const rateLimit = (req, res, next) => {
+  const ip = req.ip || req.connection.remoteAddress;
+  rateLimitStore[ip] = (rateLimitStore[ip] || 0) + 1;
+  
+  if (rateLimitStore[ip] > RATE_LIMIT) {
+    console.log(`${COLORS.RED}🚫 請求被阻擋 - 超過限流次數${COLORS.RESET} | IP: ${ip} | 次數: ${rateLimitStore[ip]}/${RATE_LIMIT}/分鐘`);
+    return res.status(429).json({ error: 'Too Many Requests' });
+  }
+  
+  if (rateLimitStore[ip] > RATE_LIMIT * 0.8) {
+    console.log(`${COLORS.YELLOW}⚠️  逼近限流閾值${COLORS.RESET} | IP: ${ip} | 次數: ${rateLimitStore[ip]}/${RATE_LIMIT}/分鐘`);
+  }
+  
+  next();
+};
 
 // Request ID middleware
 app.use((req, res, next) => {
@@ -46,7 +69,7 @@ app.use((req, res, next) => {
 
 app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
 
-app.post('/test', validateToken, (req, res) => {
+app.post('/test', rateLimit, validateToken, (req, res) => {
   console.log(`${COLORS.YELLOW}🚀 收到 Grafana 通知:${COLORS.RESET}`);
   console.dir(req.body, { depth: null, colors: true });
 
