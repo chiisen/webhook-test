@@ -5,30 +5,40 @@ const DB_PATH = process.env.DB_PATH || './webhook-history.db';
 const HISTORY_DAYS = parseInt(process.env.HISTORY_DAYS || '30', 10);
 const HISTORY_MAX_SIZE_MB = parseInt(process.env.HISTORY_MAX_SIZE_MB || '100', 10);
 
+let dbReady = false;
+
 const db = new sqlite3.Database(DB_PATH, (err) => {
   if (err) {
     console.error('Failed to connect to SQLite database:', err);
+    process.exit(1); // 或者實現重試邏輯
   } else {
     console.log(`SQLite database connected: ${DB_PATH}`);
     initTable();
+    dbReady = true;
   }
 });
 
 const initTable = () => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS requests (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      timestamp TEXT NOT NULL,
-      request_id TEXT NOT NULL,
-      method TEXT NOT NULL,
-      url TEXT NOT NULL,
-      ip TEXT,
-      status INTEGER,
-      payload TEXT
-    )
-  `);
-
-  db.run('CREATE INDEX IF NOT EXISTS idx_timestamp ON requests(timestamp)');
+  return new Promise((resolve, reject) => {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        method TEXT NOT NULL,
+        url TEXT NOT NULL,
+        ip TEXT,
+        status INTEGER,
+        payload TEXT
+      )
+    `, (err) => {
+      if (err) return reject(err);
+      db.run('CREATE INDEX IF NOT EXISTS idx_timestamp ON requests(timestamp)', (err) => {
+        if (err) return reject(err);
+        resolve();
+      });
+    });
+  });
 };
 
 const cleanupOldRecords = () => {
@@ -85,10 +95,10 @@ enforceSizeLimit();
 const saveRequest = (req, res, payload) => {
   const record = {
     timestamp: new Date().toISOString(),
-    requestId: req.id,
+    requestId: req.id || 'N/A',
     method: req.method,
     url: req.url,
-    ip: req.ip || req.connection?.remoteAddress,
+    ip: req.ip || (req.headers && req.headers['x-forwarded-for']) || req.socket.remoteAddress,
     status: res.statusCode,
     payload: JSON.stringify(payload)
   };
@@ -110,9 +120,9 @@ const saveRequest = (req, res, payload) => {
       if (err) {
         console.error('Failed to save request:', err);
       }
+      stmt.finalize();
     }
   );
-  stmt.finalize();
 };
 
 const getHistory = (limit = 100) => {
@@ -160,39 +170,26 @@ const searchHistory = (filters = {}) => {
       sql += ' AND ip LIKE ?';
       params.push(`%${filters.ip}%`);
     }
-    if (filters.url) {
-      sql += ' AND url LIKE ?';
-      params.push(`%${filters.url}%`);
-    }
 
-    sql += ' ORDER BY timestamp DESC LIMIT ?';
-    params.push(filters.limit || 100);
+    sql += ' ORDER BY timestamp DESC LIMIT 100';
 
-    const stmt = db.prepare(sql);
-    const results = [];
-
-    stmt.each(
-      (...args) => {
-        const err = args[0];
-        const row = args[1];
-        if (err) {
-          reject(err);
-          return;
-        }
-        if (row && row.payload) {
-          row.payload = JSON.parse(row.payload);
-        }
-        if (row) results.push(row);
-      },
-      (err) => {
-        stmt.finalize();
-        if (err) {
-          reject(err);
-        } else {
-          resolve(results);
-        }
+    db.all(sql, params, (err, rows) => {
+      if (err) {
+        reject(err);
+        return;
       }
-    );
+      const results = rows.map(row => {
+        if (row && row.payload) {
+          try {
+            row.payload = JSON.parse(row.payload);
+          } catch (e) {
+            console.error('Failed to parse payload:', e);
+          }
+        }
+        return row;
+      });
+      resolve(results);
+    });
   });
 };
 

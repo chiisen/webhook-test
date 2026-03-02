@@ -160,8 +160,13 @@ app.get('/history/search', async (req, res) => {
 });
 
 app.get('/history/stats', async (req, res) => {
-  const stats = await getStats();
-  res.status(200).json(stats);
+  try {
+    const historyStats = await getStats();
+    res.status(200).json(historyStats);
+  } catch (err) {
+    console.error(`${COLORS.RED}❌ 取得統計資料失敗:${COLORS.RESET}`, err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Alert filter based on labels
