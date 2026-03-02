@@ -12,6 +12,16 @@ const {
   isUsingRedis
 } = require('./rateLimiter');
 const { forwardWebhook, getForwardConfig, testForward } = require('./webhookForward');
+const {
+  verifyCortexSignature,
+  addToBlacklist,
+  removeFromBlacklist,
+  isBlacklisted,
+  getBlacklist,
+  recordViolation,
+  getSecurityConfig,
+  setLogger
+} = require('./security');
 const app = express();
 const {
   PORT,
@@ -26,16 +36,31 @@ const {
   COLORS
 } = require('./config');
 
+setLogger(logger);
+
 // CORS middleware
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Token');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Token, X-Cortex-Signature');
   if (req.method === 'OPTIONS') {
     return res.status(204).send();
   }
   next();
 });
+
+// IP Blacklist Check
+const checkBlacklist = (req, res, next) => {
+  const ip = req.ip || req.connection?.remoteAddress || req.ip;
+  const clientIp = ip.replace(/^::ffff:/, '');
+
+  if (isBlacklisted(clientIp)) {
+    logger.warn({ ip: clientIp }, 'Blocked request from blacklisted IP');
+    recordViolation(clientIp, 'blacklisted');
+    return res.status(403).json({ error: 'Forbidden: IP is blacklisted' });
+  }
+  next();
+};
 
 // IP Whitelist
 const ipWhitelist = (req, res, next) => {
@@ -69,6 +94,7 @@ const rateLimit = async (req, res, next) => {
 
   if (!result.allowed) {
     stats.blockedRequests++;
+    recordViolation(ip, 'rate_limit');
     logBlocked('rate_limit', ip, `次數: ${result.current}/${result.limit}/分鐘`);
     res.setHeader('X-RateLimit-Limit', result.limit);
     res.setHeader('X-RateLimit-Remaining', 0);
@@ -136,6 +162,19 @@ app.use((req, res, next) => {
   next();
 });
 
+// Cortex Signature validation middleware
+const validateCortexSignature = (req, res, next) => {
+  const signature = req.headers['x-cortex-signature'];
+  const result = verifyCortexSignature(req.body, signature);
+
+  if (!result.valid) {
+    logger.warn({ reason: result.reason }, 'Cortex signature validation failed');
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
+
+  next();
+};
+
 app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
 
 app.get('/stats', (req, res) => {
@@ -146,6 +185,29 @@ app.get('/stats', (req, res) => {
     uptimeSeconds: uptime,
     rateLimitEngine: isUsingRedis ? 'redis' : 'memory'
   });
+});
+
+app.get('/security/config', (req, res) => {
+  res.status(200).json(getSecurityConfig());
+});
+
+app.get('/blacklist', (req, res) => {
+  res.status(200).json({ blacklist: getBlacklist() });
+});
+
+app.post('/blacklist', (req, res) => {
+  const { ip, reason } = req.body;
+  if (!ip) {
+    return res.status(400).json({ error: 'Missing ip parameter' });
+  }
+  addToBlacklist(ip, reason || 'manual');
+  res.status(200).json({ success: true, ip });
+});
+
+app.delete('/blacklist/:ip', (req, res) => {
+  const { ip } = req.params;
+  removeFromBlacklist(ip);
+  res.status(200).json({ success: true, ip });
 });
 
 app.get('/ratelimit/stats', async (req, res) => {
@@ -221,45 +283,54 @@ const filterAlerts = (alerts) => {
   });
 };
 
-app.post('/test', ipWhitelist, rateLimit, validateToken, validatePayload, async (req, res) => {
-  stats.totalRequests++;
-  logger.info({ status: req.body.status }, '收到 Grafana 通知');
+app.post(
+  '/test',
+  checkBlacklist,
+  ipWhitelist,
+  rateLimit,
+  validateCortexSignature,
+  validateToken,
+  validatePayload,
+  async (req, res) => {
+    stats.totalRequests++;
+    logger.info({ status: req.body.status }, '收到 Grafana 通知');
 
-  const alerts = req.body.alerts || [];
-  const filteredAlerts = filterAlerts(alerts);
+    const alerts = req.body.alerts || [];
+    const filteredAlerts = filterAlerts(alerts);
 
-  if (filteredAlerts.length !== alerts.length) {
-    logger.info({ original: alerts.length, filtered: filteredAlerts.length }, 'Alert 數量過濾');
-  }
-
-  logger.debug({ payload: req.body }, 'Request Body');
-
-  if (req.body && req.body.status === 'firing' && filteredAlerts.length > 0) {
-    if (process.platform === 'darwin') {
-      const soundName = ALERT_SOUND;
-      const volume = ALERT_VOLUME;
-      const soundPath = `/System/Library/Sounds/${soundName}.aiff`;
-
-      exec(`afplay -v ${volume} "${soundPath}"`, (err) => {
-        if (err) logger.error({ error: err.message }, '無法播放音效');
-      });
+    if (filteredAlerts.length !== alerts.length) {
+      logger.info({ original: alerts.length, filtered: filteredAlerts.length }, 'Alert 數量過濾');
     }
+
+    logger.debug({ payload: req.body }, 'Request Body');
+
+    if (req.body && req.body.status === 'firing' && filteredAlerts.length > 0) {
+      if (process.platform === 'darwin') {
+        const soundName = ALERT_SOUND;
+        const volume = ALERT_VOLUME;
+        const soundPath = `/System/Library/Sounds/${soundName}.aiff`;
+
+        exec(`afplay -v ${volume} "${soundPath}"`, (err) => {
+          if (err) logger.error({ error: err.message }, '無法播放音效');
+        });
+      }
+    }
+
+    const forwardResult = await forwardWebhook(req.body);
+    if (!forwardResult.success && forwardResult.error !== 'Forwarding is disabled') {
+      logger.warn({ error: forwardResult.error }, 'Webhook 轉發失敗');
+    }
+
+    logAlert(req.body.status, alerts.length, filteredAlerts.length);
+    saveRequest(req, res, req.body);
+
+    res.status(200).json({
+      status: 'ok',
+      message: 'received',
+      forwarded: forwardResult.success ? forwardResult.total : 0
+    });
   }
-
-  const forwardResult = await forwardWebhook(req.body);
-  if (!forwardResult.success && forwardResult.error !== 'Forwarding is disabled') {
-    logger.warn({ error: forwardResult.error }, 'Webhook 轉發失敗');
-  }
-
-  logAlert(req.body.status, alerts.length, filteredAlerts.length);
-  saveRequest(req, res, req.body);
-
-  res.status(200).json({
-    status: 'ok',
-    message: 'received',
-    forwarded: forwardResult.success ? forwardResult.total : 0
-  });
-});
+);
 
 // Error handling middleware
 app.use((err, req, res, _next) => {

@@ -154,6 +154,10 @@ curl -X POST http://localhost:9999/test \
 | `/ratelimit/:ip`   | DELETE | 清除特定 IP 的限流計數              |
 | `/forward/config`  | GET    | 轉發設定資訊                        |
 | `/forward/test`    | POST   | 測試轉發到指定 URL                  |
+| `/security/config` | GET    | 安全設定資訊                        |
+| `/blacklist`       | GET    | 取得黑名單                          |
+| `/blacklist`       | POST   | 新增 IP 到黑名單                    |
+| `/blacklist/:ip`   | DELETE | 移除 IP 從黑名單                    |
 
 ### /test 請求範例
 
@@ -244,8 +248,8 @@ npm test
 
 ### 4. 🛡️ 安全強化
 
-- [ ] 請求驗證 `X-Cortex-Signature` header：支援 Grafana 驗證
-- [ ] 黑名單機制：被 block 的 IP 加入黑名單
+- [x] 請求驗證 `X-Cortex-Signature` header：支援 Grafana 驗證
+- [x] 黑名單機制：被 block 的 IP 加入黑名單
 
 ### 5. 🔄 流量管理
 

@@ -37,6 +37,22 @@ jest.mock('./webhookForward', () => ({
   testForward: jest.fn().mockResolvedValue({ success: true })
 }));
 
+jest.mock('./security', () => ({
+  verifyCortexSignature: jest.fn().mockReturnValue({ valid: true, reason: 'OK' }),
+  addToBlacklist: jest.fn(),
+  removeFromBlacklist: jest.fn(),
+  isBlacklisted: jest.fn().mockReturnValue(false),
+  getBlacklist: jest.fn().mockReturnValue([]),
+  recordViolation: jest.fn(),
+  getSecurityConfig: jest
+    .fn()
+    .mockReturnValue({
+      cortexSignature: { enabled: false },
+      blacklist: { enabled: true, count: 0 }
+    }),
+  setLogger: jest.fn()
+}));
+
 const app = require('./server');
 
 describe('Webhook Server', () => {
