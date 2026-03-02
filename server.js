@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const { exec } = require('child_process');
 const crypto = require('crypto');
+const http = require('http');
 const { saveRequest, getHistory, searchHistory, getStats, closeDb } = require('./history');
 const { logger, logRequest, logAlert, logBlocked, closeLogger } = require('./logger');
 const {
@@ -23,6 +24,8 @@ const {
   setLogger
 } = require('./security');
 const { sendNotification, testNotification, getNotificationConfig } = require('./notification');
+const configReloader = require('./configReloader');
+const websocket = require('./websocket');
 const app = express();
 const {
   PORT,
@@ -234,6 +237,17 @@ app.get('/notification/config', (req, res) => {
   res.status(200).json(getNotificationConfig());
 });
 
+app.get('/config', (req, res) => {
+  res.status(200).json(configReloader.getAllConfig());
+});
+
+app.post('/config/reload', (req, res) => {
+  const reloaded = configReloader.reloadConfig();
+  res
+    .status(200)
+    .json({ success: reloaded, message: reloaded ? 'Config reloaded' : 'No changes detected' });
+});
+
 app.post('/notification/test', async (req, res) => {
   const { type } = req.body;
   if (!type) {
@@ -250,6 +264,43 @@ app.post('/forward/test', async (req, res) => {
   }
   const result = await testForward(url);
   res.status(200).json(result);
+});
+
+app.get('/ws/status', (req, res) => {
+  res.status(200).json({
+    enabled: websocket.isEnabled,
+    clients: websocket.getClientCount()
+  });
+});
+
+app.post('/replay/:id', async (req, res) => {
+  const { id } = req.params;
+  const history = await getHistory(10000);
+  const record = history.find((h) => h.id === parseInt(id, 10) || h.request_id === id);
+
+  if (!record) {
+    return res.status(404).json({ error: 'Request not found' });
+  }
+
+  const payload = record.payload;
+  const results = {
+    forwarded: null,
+    notification: null
+  };
+
+  if (payload) {
+    const forwardResult = await forwardWebhook(payload);
+    results.forwarded = forwardResult;
+
+    const notificationResult = await sendNotification(payload);
+    results.notification = notificationResult;
+  }
+
+  res.status(200).json({
+    success: true,
+    requestId: id,
+    replayed: results
+  });
 });
 
 app.get('/history', async (req, res) => {
@@ -342,6 +393,12 @@ app.post(
       logger.info({ results: notificationResult.results }, '通知已發送');
     }
 
+    websocket.broadcastAlert({
+      status: req.body.status,
+      alerts: filteredAlerts,
+      timestamp: new Date().toISOString()
+    });
+
     logAlert(req.body.status, alerts.length, filteredAlerts.length);
     saveRequest(req, res, req.body);
 
@@ -361,7 +418,15 @@ app.use((err, req, res, _next) => {
 
 // Start server if run directly
 if (require.main === module) {
-  const server = app.listen(PORT, () => {
+  const server = http.createServer(app);
+
+  websocket.initWebSocket(server);
+  configReloader.watchConfig();
+  configReloader.onConfigChange((changes) => {
+    logger.info({ changes }, 'Config changed via hot reload');
+  });
+
+  server.listen(PORT, () => {
     logger.info({ port: PORT }, '伺服器啟動');
   });
 
@@ -370,6 +435,7 @@ if (require.main === module) {
     closeDb();
     await closeRedis();
     await closeLogger();
+    websocket.closeWebSocket();
     server.close(() => {
       logger.info('伺服器已關閉');
       process.exit(0);

@@ -160,6 +160,10 @@ curl -X POST http://localhost:9999/test \
 | `/blacklist/:ip`       | DELETE | 移除 IP 從黑名單                    |
 | `/notification/config` | GET    | 通知設定資訊                        |
 | `/notification/test`   | POST   | 測試通知 (telegram/discord/script)  |
+| `/config`              | GET    | 取得目前設定                        |
+| `/config/reload`       | POST   | 熱重載設定檔                        |
+| `/ws/status`           | GET    | WebSocket 狀態                      |
+| `/replay/:id`          | POST   | 重新發送歷史請求                    |
 
 ### /test 請求範例
 
@@ -260,6 +264,6 @@ npm test
 
 ### 6. ⚡ 功能擴展
 
-- [ ] 熱重載配置：修改 `.env` 無需重啟伺服器
-- [ ] Replay 功能：重新發送歷史請求
-- [ ] WebSocket：即時推送 alerts 到前端 UI
+- [x] 熱重載配置：修改 `.env` 無需重啟伺服器
+- [x] Replay 功能：重新發送歷史請求
+- [x] WebSocket：即時推送 alerts 到前端 UI

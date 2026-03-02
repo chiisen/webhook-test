@@ -44,12 +44,10 @@ jest.mock('./security', () => ({
   isBlacklisted: jest.fn().mockReturnValue(false),
   getBlacklist: jest.fn().mockReturnValue([]),
   recordViolation: jest.fn(),
-  getSecurityConfig: jest
-    .fn()
-    .mockReturnValue({
-      cortexSignature: { enabled: false },
-      blacklist: { enabled: true, count: 0 }
-    }),
+  getSecurityConfig: jest.fn().mockReturnValue({
+    cortexSignature: { enabled: false },
+    blacklist: { enabled: true, count: 0 }
+  }),
   setLogger: jest.fn()
 }));
 
@@ -63,6 +61,25 @@ jest.mock('./notification', () => ({
       discord: { enabled: false },
       customScript: { enabled: false }
     })
+}));
+
+jest.mock('./configReloader', () => ({
+  watchConfig: jest.fn(),
+  startReloader: jest.fn(),
+  onConfigChange: jest.fn(),
+  getConfig: jest.fn(),
+  getAllConfig: jest.fn().mockReturnValue({}),
+  reloadConfig: jest.fn().mockReturnValue(false)
+}));
+
+jest.mock('./websocket', () => ({
+  initWebSocket: jest.fn(),
+  broadcast: jest.fn(),
+  broadcastAlert: jest.fn(),
+  broadcastRequest: jest.fn(),
+  getClientCount: jest.fn().mockReturnValue(0),
+  closeWebSocket: jest.fn(),
+  isEnabled: false
 }));
 
 const app = require('./server');
