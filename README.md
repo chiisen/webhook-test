@@ -142,22 +142,24 @@ curl -X POST http://localhost:9999/test \
 
 ## 📡 API 端點
 
-| 端點               | 方法   | 說明                                |
-| ------------------ | ------ | ----------------------------------- |
-| `/health`          | GET    | 服務健康檢查                        |
-| `/stats`           | GET    | 請求統計資訊                        |
-| `/test`            | POST   | Grafana Webhook 接收端點            |
-| `/history`         | GET    | 請求歷史記錄 (SQLite)               |
-| `/history/search`  | GET    | 搜尋歷史記錄 (支援 status, ip, url) |
-| `/history/stats`   | GET    | 歷史記錄統計 (總數, firing 數量)    |
-| `/ratelimit/stats` | GET    | Rate Limit 統計 (Redis/記憶體)      |
-| `/ratelimit/:ip`   | DELETE | 清除特定 IP 的限流計數              |
-| `/forward/config`  | GET    | 轉發設定資訊                        |
-| `/forward/test`    | POST   | 測試轉發到指定 URL                  |
-| `/security/config` | GET    | 安全設定資訊                        |
-| `/blacklist`       | GET    | 取得黑名單                          |
-| `/blacklist`       | POST   | 新增 IP 到黑名單                    |
-| `/blacklist/:ip`   | DELETE | 移除 IP 從黑名單                    |
+| 端點                   | 方法   | 說明                                |
+| ---------------------- | ------ | ----------------------------------- |
+| `/health`              | GET    | 服務健康檢查                        |
+| `/stats`               | GET    | 請求統計資訊                        |
+| `/test`                | POST   | Grafana Webhook 接收端點            |
+| `/history`             | GET    | 請求歷史記錄 (SQLite)               |
+| `/history/search`      | GET    | 搜尋歷史記錄 (支援 status, ip, url) |
+| `/history/stats`       | GET    | 歷史記錄統計 (總數, firing 數量)    |
+| `/ratelimit/stats`     | GET    | Rate Limit 統計 (Redis/記憶體)      |
+| `/ratelimit/:ip`       | DELETE | 清除特定 IP 的限流計數              |
+| `/forward/config`      | GET    | 轉發設定資訊                        |
+| `/forward/test`        | POST   | 測試轉發到指定 URL                  |
+| `/security/config`     | GET    | 安全設定資訊                        |
+| `/blacklist`           | GET    | 取得黑名單                          |
+| `/blacklist`           | POST   | 新增 IP 到黑名單                    |
+| `/blacklist/:ip`       | DELETE | 移除 IP 從黑名單                    |
+| `/notification/config` | GET    | 通知設定資訊                        |
+| `/notification/test`   | POST   | 測試通知 (telegram/discord/script)  |
 
 ### /test 請求範例
 
@@ -231,8 +233,8 @@ npm test
 
 ### 1. 🔔 通知增強
 
-- [ ] 多管道通知：加入 Telegram/Discord/Slack 通知支援
-- [ ] 自定義腳本觸發：收到 firing alert 時執行自定義腳本
+- [x] 多管道通知：加入 Telegram/Discord/Slack 通知支援
+- [x] 自定義腳本觸發：收到 firing alert 時執行自定義腳本
 
 ### 2. 📝 日誌管理
 

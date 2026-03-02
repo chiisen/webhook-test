@@ -53,6 +53,18 @@ jest.mock('./security', () => ({
   setLogger: jest.fn()
 }));
 
+jest.mock('./notification', () => ({
+  sendNotification: jest.fn().mockResolvedValue({ success: true, results: {} }),
+  testNotification: jest.fn().mockResolvedValue({ success: true }),
+  getNotificationConfig: jest
+    .fn()
+    .mockReturnValue({
+      telegram: { enabled: false },
+      discord: { enabled: false },
+      customScript: { enabled: false }
+    })
+}));
+
 const app = require('./server');
 
 describe('Webhook Server', () => {

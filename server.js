@@ -22,6 +22,7 @@ const {
   getSecurityConfig,
   setLogger
 } = require('./security');
+const { sendNotification, testNotification, getNotificationConfig } = require('./notification');
 const app = express();
 const {
   PORT,
@@ -229,6 +230,19 @@ app.get('/forward/config', (req, res) => {
   res.status(200).json(getForwardConfig());
 });
 
+app.get('/notification/config', (req, res) => {
+  res.status(200).json(getNotificationConfig());
+});
+
+app.post('/notification/test', async (req, res) => {
+  const { type } = req.body;
+  if (!type) {
+    return res.status(400).json({ error: 'Missing type parameter (telegram, discord, script)' });
+  }
+  const result = await testNotification(type);
+  res.status(200).json(result);
+});
+
 app.post('/forward/test', async (req, res) => {
   const { url } = req.body;
   if (!url) {
@@ -319,6 +333,13 @@ app.post(
     const forwardResult = await forwardWebhook(req.body);
     if (!forwardResult.success && forwardResult.error !== 'Forwarding is disabled') {
       logger.warn({ error: forwardResult.error }, 'Webhook 轉發失敗');
+    }
+
+    const notificationResult = await sendNotification(req.body);
+    if (!notificationResult.success) {
+      logger.debug({ reason: notificationResult.reason }, '通知跳過');
+    } else {
+      logger.info({ results: notificationResult.results }, '通知已發送');
     }
 
     logAlert(req.body.status, alerts.length, filteredAlerts.length);
