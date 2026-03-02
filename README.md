@@ -88,6 +88,15 @@ API_TOKEN=your-secret-token
 # Request Body 大小限制 (預設: 1mb)
 # BODY_LIMIT=1mb
 
+# SQLite 資料庫路徑 (預設: ./webhook-history.db)
+DB_PATH=./webhook-history.db
+
+# 歷史記錄保留天數 (預設: 30)
+HISTORY_DAYS=30
+
+# 歷史記錄最大大小 MB (預設: 100)
+HISTORY_MAX_SIZE_MB=100
+
 # IP 白名單 (逗號分隔，留空允許所有，* 代表任意)
 # ALLOWED_IPS=127.0.0.1,::1
 
@@ -133,11 +142,14 @@ curl -X POST http://localhost:9999/test \
 
 ## 📡 API 端點
 
-| 端點      | 方法 | 說明                     |
-| --------- | ---- | ------------------------ |
-| `/health` | GET  | 服務健康檢查             |
-| `/stats`  | GET  | 請求統計資訊             |
-| `/test`   | POST | Grafana Webhook 接收端點 |
+| 端點              | 方法 | 說明                                |
+| ----------------- | ---- | ----------------------------------- |
+| `/health`         | GET  | 服務健康檢查                        |
+| `/stats`          | GET  | 請求統計資訊                        |
+| `/test`           | POST | Grafana Webhook 接收端點            |
+| `/history`        | GET  | 請求歷史記錄 (SQLite)               |
+| `/history/search` | GET  | 搜尋歷史記錄 (支援 status, ip, url) |
+| `/history/stats`  | GET  | 歷史記錄統計 (總數, firing 數量)    |
 
 ### /test 請求範例
 
@@ -173,3 +185,40 @@ curl -X POST http://localhost:9999/test \
 # 執行單元測試
 npm test
 ```
+
+---
+
+## 📋 待辦事項 (Todo List)
+
+### 1. 🔔 通知增強
+
+- [ ] 多管道通知：加入 Telegram/Discord/Slack 通知支援
+- [ ] 自定義腳本觸發：收到 firing alert 時執行自定義腳本
+
+### 2. 📝 日誌管理
+
+- [ ] 日誌輪轉：使用 `winston` 或 `pino` 實現日誌檔案輪轉
+- [ ] 結構化日誌：改為 JSON 格式輸出，方便日後分析
+- [ ] 請求日誌：獨立記錄請求到日誌檔案（目前只在控制台輸出）
+
+### 3. 💾 歷史記錄優化
+
+- [x] 自動清理：自動刪除 N 天前的歷史記錄
+- [x] 大小限制：限制歷史檔案最大 size
+- [x] 資料庫儲存：改用 SQLite 方便查詢與篩選
+
+### 4. 🛡️ 安全強化
+
+- [ ] 請求驗證 `X-Cortex-Signature` header：支援 Grafana 驗證
+- [ ] 黑名單機制：被 block 的 IP 加入黑名單
+
+### 5. 🔄 流量管理
+
+- [ ] Redis Rate Limit：重啟不丟失計數
+- [ ] Webhook 轉發：可將請求轉發到其他 endpoint
+
+### 6. ⚡ 功能擴展
+
+- [ ] 熱重載配置：修改 `.env` 無需重啟伺服器
+- [ ] Replay 功能：重新發送歷史請求
+- [ ] WebSocket：即時推送 alerts 到前端 UI

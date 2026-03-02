@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const { exec } = require('child_process');
 const crypto = require('crypto');
-const { saveRequest, getHistory } = require('./history');
+const { saveRequest, getHistory, searchHistory, getStats, closeDb } = require('./history');
 const app = express();
 const {
   PORT,
@@ -14,7 +14,7 @@ const {
   ALERT_VOLUME,
   FILTER_LABELS,
   FILTER_MODE,
-  COLORS,
+  COLORS
 } = require('./config');
 
 // CORS middleware
@@ -141,10 +141,27 @@ app.get('/stats', (req, res) => {
   });
 });
 
-app.get('/history', (req, res) => {
+app.get('/history', async (req, res) => {
   const limit = parseInt(req.query.limit || '100', 10);
-  const history = getHistory(limit);
+  const history = await getHistory(limit);
   res.status(200).json({ history });
+});
+
+app.get('/history/search', async (req, res) => {
+  const limit = parseInt(req.query.limit || '100', 10);
+  const filters = {
+    status: req.query.status,
+    ip: req.query.ip,
+    url: req.query.url,
+    limit
+  };
+  const history = await searchHistory(filters);
+  res.status(200).json({ history });
+});
+
+app.get('/history/stats', async (req, res) => {
+  const stats = await getStats();
+  res.status(200).json(stats);
 });
 
 // Alert filter based on labels
@@ -172,7 +189,9 @@ app.post('/test', ipWhitelist, rateLimit, validateToken, validatePayload, (req, 
   const filteredAlerts = filterAlerts(alerts);
 
   if (filteredAlerts.length !== alerts.length) {
-    console.log(`${COLORS.CYAN}過濾後 Alert 數量: ${filteredAlerts.length} / ${alerts.length}${COLORS.RESET}`);
+    console.log(
+      `${COLORS.CYAN}過濾後 Alert 數量: ${filteredAlerts.length} / ${alerts.length}${COLORS.RESET}`
+    );
   }
 
   console.dir(req.body, { depth: null, colors: true });
@@ -214,6 +233,7 @@ if (require.main === module) {
 
   const shutdown = (signal) => {
     console.log(`${COLORS.YELLOW}收到 ${signal}，正在關閉伺服器...${COLORS.RESET}`);
+    closeDb();
     server.close(() => {
       console.log(`${COLORS.GREEN}伺服器已關閉${COLORS.RESET}`);
       process.exit(0);

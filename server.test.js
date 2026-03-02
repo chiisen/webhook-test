@@ -1,4 +1,13 @@
 const request = require('supertest');
+
+jest.mock('./history', () => ({
+  saveRequest: jest.fn(),
+  getHistory: jest.fn().mockResolvedValue([]),
+  searchHistory: jest.fn().mockResolvedValue([]),
+  getStats: jest.fn().mockResolvedValue({ totalRecords: 0, firingAlerts: 0 }),
+  closeDb: jest.fn()
+}));
+
 const app = require('./server');
 
 describe('Webhook Server', () => {
@@ -17,13 +26,17 @@ describe('Webhook Server', () => {
 
   describe('POST /test', () => {
     it('should return ok with received message', async () => {
-      const res = await request(app).post('/test').send({ alert: 'test' });
+      const res = await request(app)
+        .post('/test')
+        .send({ status: 'firing', alerts: [{ title: 'Test Alert', state: 'firing' }] });
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ status: 'ok', message: 'received' });
     });
 
     it('should include X-Request-ID header', async () => {
-      const res = await request(app).post('/test').send({});
+      const res = await request(app)
+        .post('/test')
+        .send({ status: 'firing', alerts: [{ title: 'Test Alert' }] });
       expect(res.headers['x-request-id']).toBeDefined();
     });
   });
