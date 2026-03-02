@@ -8,6 +8,35 @@ jest.mock('./history', () => ({
   closeDb: jest.fn()
 }));
 
+jest.mock('./logger', () => ({
+  logger: {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn()
+  },
+  logRequest: jest.fn(),
+  logAlert: jest.fn(),
+  logBlocked: jest.fn(),
+  closeLogger: jest.fn().mockResolvedValue(undefined)
+}));
+
+jest.mock('./rateLimiter', () => ({
+  checkRateLimit: jest
+    .fn()
+    .mockResolvedValue({ allowed: true, current: 1, limit: 60, remaining: 59 }),
+  getRateLimitStats: jest.fn().mockResolvedValue({ useRedis: false, stats: [] }),
+  resetRateLimit: jest.fn().mockResolvedValue(true),
+  closeRedis: jest.fn().mockResolvedValue(undefined),
+  isUsingRedis: false
+}));
+
+jest.mock('./webhookForward', () => ({
+  forwardWebhook: jest.fn().mockResolvedValue({ success: false, error: 'Forwarding is disabled' }),
+  getForwardConfig: jest.fn().mockReturnValue({ enabled: false, endpoints: [] }),
+  testForward: jest.fn().mockResolvedValue({ success: true })
+}));
+
 const app = require('./server');
 
 describe('Webhook Server', () => {
@@ -30,7 +59,7 @@ describe('Webhook Server', () => {
         .post('/test')
         .send({ status: 'firing', alerts: [{ title: 'Test Alert', state: 'firing' }] });
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ status: 'ok', message: 'received' });
+      expect(res.body).toEqual({ status: 'ok', message: 'received', forwarded: 0 });
     });
 
     it('should include X-Request-ID header', async () => {

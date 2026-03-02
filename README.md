@@ -142,14 +142,18 @@ curl -X POST http://localhost:9999/test \
 
 ## 📡 API 端點
 
-| 端點              | 方法 | 說明                                |
-| ----------------- | ---- | ----------------------------------- |
-| `/health`         | GET  | 服務健康檢查                        |
-| `/stats`          | GET  | 請求統計資訊                        |
-| `/test`           | POST | Grafana Webhook 接收端點            |
-| `/history`        | GET  | 請求歷史記錄 (SQLite)               |
-| `/history/search` | GET  | 搜尋歷史記錄 (支援 status, ip, url) |
-| `/history/stats`  | GET  | 歷史記錄統計 (總數, firing 數量)    |
+| 端點               | 方法   | 說明                                |
+| ------------------ | ------ | ----------------------------------- |
+| `/health`          | GET    | 服務健康檢查                        |
+| `/stats`           | GET    | 請求統計資訊                        |
+| `/test`            | POST   | Grafana Webhook 接收端點            |
+| `/history`         | GET    | 請求歷史記錄 (SQLite)               |
+| `/history/search`  | GET    | 搜尋歷史記錄 (支援 status, ip, url) |
+| `/history/stats`   | GET    | 歷史記錄統計 (總數, firing 數量)    |
+| `/ratelimit/stats` | GET    | Rate Limit 統計 (Redis/記憶體)      |
+| `/ratelimit/:ip`   | DELETE | 清除特定 IP 的限流計數              |
+| `/forward/config`  | GET    | 轉發設定資訊                        |
+| `/forward/test`    | POST   | 測試轉發到指定 URL                  |
 
 ### /test 請求範例
 
@@ -190,6 +194,37 @@ npm test
 
 ## 📋 待辦事項 (Todo List)
 
+### 🐛 已知問題 (Known Issues)
+
+#### Jest 測試無法正常結束 (Node.js Worker Threads 資源釋放問題)
+
+**問題描述**：
+執行 `npm test` 時，Jest 測試完成後無法正常退出，須使用 `--forceExit` 強制結束。
+
+**根本原因**：
+
+- `pino-pretty` 和 `pino-roll` 內部使用 Node.js worker threads
+- SQLite 也有內部非同步連線
+- 這些 worker threads 不會自動觸發 Jest 的 cleanup，導致 Jest 誤以為仍有非同步操作進行中
+
+**暫行解決方案**：
+
+- 在 `package.json` 中使用 `jest --forceExit` 強制結束
+- 這是 Node.js 生態系統中常見的 async 資源管理問題
+
+**可能的根本解決方案**：
+
+- 避免在測試中載入真實的 logger 和 history 模組（已實作 jest.mock）
+- 使用自定義的同步日誌方案（會失去 pino-pretty 彩色輸出）
+- 在 jest.config.js 中配置 `testEnvironmentOptions` 來清理 handles
+
+**相關討論**：
+
+- [Jest #10566 - Cannot exit due to pending async operations](https://github.com/jestjs/jest/issues/10566)
+- [Pino #1701 - Worker threads not cleaned up](https://github.com/pinojs/pino/issues/1701)
+
+---
+
 ### 1. 🔔 通知增強
 
 - [ ] 多管道通知：加入 Telegram/Discord/Slack 通知支援
@@ -197,9 +232,9 @@ npm test
 
 ### 2. 📝 日誌管理
 
-- [ ] 日誌輪轉：使用 `winston` 或 `pino` 實現日誌檔案輪轉
-- [ ] 結構化日誌：改為 JSON 格式輸出，方便日後分析
-- [ ] 請求日誌：獨立記錄請求到日誌檔案（目前只在控制台輸出）
+- [x] 日誌輪轉：使用 `pino` 實現日誌檔案輪轉
+- [x] 結構化日誌：改為 JSON 格式輸出，方便日後分析
+- [x] 請求日誌：獨立記錄請求到日誌檔案
 
 ### 3. 💾 歷史記錄優化
 
@@ -214,8 +249,8 @@ npm test
 
 ### 5. 🔄 流量管理
 
-- [ ] Redis Rate Limit：重啟不丟失計數
-- [ ] Webhook 轉發：可將請求轉發到其他 endpoint
+- [x] Redis Rate Limit：重啟不丟失計數
+- [x] Webhook 轉發：可將請求轉發到其他 endpoint
 
 ### 6. ⚡ 功能擴展
 

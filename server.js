@@ -3,6 +3,15 @@ const express = require('express');
 const { exec } = require('child_process');
 const crypto = require('crypto');
 const { saveRequest, getHistory, searchHistory, getStats, closeDb } = require('./history');
+const { logger, logRequest, logAlert, logBlocked, closeLogger } = require('./logger');
+const {
+  checkRateLimit,
+  getRateLimitStats,
+  resetRateLimit,
+  closeRedis,
+  isUsingRedis
+} = require('./rateLimiter');
+const { forwardWebhook, getForwardConfig, testForward } = require('./webhookForward');
 const app = express();
 const {
   PORT,
@@ -37,7 +46,8 @@ const ipWhitelist = (req, res, next) => {
     ALLOWED_IPS.length > 0 &&
     !ALLOWED_IPS.some((allowed) => clientIp === allowed.trim() || allowed.trim() === '*')
   ) {
-    console.log(`${COLORS.RED}🚫 IP 被阻擋${COLORS.RESET} | IP: ${clientIp} | 不在白名單中`);
+    logBlocked('ip_whitelist', clientIp, '不在白名單中');
+    logger.info({ ip: clientIp, reason: 'ip_whitelist' }, 'IP 被阻擋');
     return res.status(403).json({ error: 'Forbidden: IP not allowed' });
   }
   next();
@@ -52,28 +62,30 @@ const stats = {
   startTime: Date.now()
 };
 
-// Rate Limiting
-const rateLimitStore = {};
-setInterval(() => {
-  Object.keys(rateLimitStore).forEach((ip) => (rateLimitStore[ip] = 0));
-}, 60000);
+// Rate Limiting (Redis-based)
+const rateLimit = async (req, res, next) => {
+  const ip = req.ip || req.connection?.remoteAddress || req.ip;
+  const result = await checkRateLimit(ip);
 
-const rateLimit = (req, res, next) => {
-  const ip = req.ip || req.connection.remoteAddress;
-  rateLimitStore[ip] = (rateLimitStore[ip] || 0) + 1;
-
-  if (rateLimitStore[ip] > RATE_LIMIT) {
+  if (!result.allowed) {
     stats.blockedRequests++;
-    console.log(
-      `${COLORS.RED}🚫 請求被阻擋 - 超過限流次數${COLORS.RESET} | IP: ${ip} | 次數: ${rateLimitStore[ip]}/${RATE_LIMIT}/分鐘`
-    );
-    return res.status(429).json({ error: 'Too Many Requests' });
+    logBlocked('rate_limit', ip, `次數: ${result.current}/${result.limit}/分鐘`);
+    res.setHeader('X-RateLimit-Limit', result.limit);
+    res.setHeader('X-RateLimit-Remaining', 0);
+    res.setHeader('X-RateLimit-Reset', Math.floor(Date.now() / 1000) + 60);
+    return res.status(429).json({
+      error: 'Too Many Requests',
+      limit: result.limit,
+      remaining: 0
+    });
   }
 
-  if (rateLimitStore[ip] > RATE_LIMIT * 0.8) {
-    console.log(
-      `${COLORS.YELLOW}⚠️  逼近限流閾值${COLORS.RESET} | IP: ${ip} | 次數: ${rateLimitStore[ip]}/${RATE_LIMIT}/分鐘`
-    );
+  res.setHeader('X-RateLimit-Limit', result.limit);
+  res.setHeader('X-RateLimit-Remaining', result.remaining);
+  res.setHeader('X-RateLimit-Reset', Math.floor(Date.now() / 1000) + 60);
+
+  if (result.current > RATE_LIMIT * 0.8) {
+    logger.warn({ ip, count: result.current, limit: result.limit }, '逼近限流閾值');
   }
 
   next();
@@ -102,31 +114,25 @@ const validatePayload = (req, res, next) => {
   const body = req.body;
 
   if (!body || typeof body !== 'object') {
-    console.log(`${COLORS.RED}⚠️  無效 Payload${COLORS.RESET} | 原因: 請求體為空或格式錯誤`);
+    logger.warn({ reason: '請求體為空或格式錯誤' }, '無效 Payload');
     return res.status(400).json({ error: 'Invalid payload: empty or malformed JSON' });
   }
 
   const { status, alerts } = body;
 
   if (!status || !['firing', 'resolved'].includes(status)) {
-    console.log(
-      `${COLORS.RED}⚠️  無效 Payload${COLORS.RESET} | 原因: 缺少 status 欄位或值不正確 (firing/resolved)`
-    );
+    logger.warn({ status, reason: '缺少 status 欄位或值不正確' }, '無效 Payload');
     return res.status(400).json({ error: 'Invalid payload: missing or invalid status field' });
   }
 
-  console.log(
-    `${COLORS.GREEN}✅ Payload 驗證通過${COLORS.RESET} | status: ${status} | alerts: ${alerts?.length || 0} 個`
-  );
+  logger.info({ status, alertsCount: alerts?.length || 0 }, 'Payload 驗證通過');
   next();
 };
 
 // Log middleware with timestamp
 app.use((req, res, next) => {
-  const timestamp = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
-  console.log(
-    `${COLORS.DIM}[${timestamp}]${COLORS.RESET} ${COLORS.BLUE}[${req.id}]${COLORS.RESET} ${COLORS.GREEN}${req.method}${COLORS.RESET} ${COLORS.CYAN}${req.url}${COLORS.RESET}`
-  );
+  req.startTime = Date.now();
+  logger.info({ method: req.method, url: req.url, requestId: req.id }, 'HTTP Request');
   next();
 });
 
@@ -137,8 +143,37 @@ app.get('/stats', (req, res) => {
   res.status(200).json({
     totalRequests: stats.totalRequests,
     blockedRequests: stats.blockedRequests,
-    uptimeSeconds: uptime
+    uptimeSeconds: uptime,
+    rateLimitEngine: isUsingRedis ? 'redis' : 'memory'
   });
+});
+
+app.get('/ratelimit/stats', async (req, res) => {
+  try {
+    const rateStats = await getRateLimitStats();
+    res.status(200).json(rateStats);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/ratelimit/:ip', async (req, res) => {
+  const { ip } = req.params;
+  const success = await resetRateLimit(ip);
+  res.status(success ? 200 : 500).json({ success, ip });
+});
+
+app.get('/forward/config', (req, res) => {
+  res.status(200).json(getForwardConfig());
+});
+
+app.post('/forward/test', async (req, res) => {
+  const { url } = req.body;
+  if (!url) {
+    return res.status(400).json({ error: 'Missing url parameter' });
+  }
+  const result = await testForward(url);
+  res.status(200).json(result);
 });
 
 app.get('/history', async (req, res) => {
@@ -186,20 +221,18 @@ const filterAlerts = (alerts) => {
   });
 };
 
-app.post('/test', ipWhitelist, rateLimit, validateToken, validatePayload, (req, res) => {
+app.post('/test', ipWhitelist, rateLimit, validateToken, validatePayload, async (req, res) => {
   stats.totalRequests++;
-  console.log(`${COLORS.YELLOW}收到 Grafana 通知:${COLORS.RESET}`);
+  logger.info({ status: req.body.status }, '收到 Grafana 通知');
 
   const alerts = req.body.alerts || [];
   const filteredAlerts = filterAlerts(alerts);
 
   if (filteredAlerts.length !== alerts.length) {
-    console.log(
-      `${COLORS.CYAN}過濾後 Alert 數量: ${filteredAlerts.length} / ${alerts.length}${COLORS.RESET}`
-    );
+    logger.info({ original: alerts.length, filtered: filteredAlerts.length }, 'Alert 數量過濾');
   }
 
-  console.dir(req.body, { depth: null, colors: true });
+  logger.debug({ payload: req.body }, 'Request Body');
 
   if (req.body && req.body.status === 'firing' && filteredAlerts.length > 0) {
     if (process.platform === 'darwin') {
@@ -208,39 +241,45 @@ app.post('/test', ipWhitelist, rateLimit, validateToken, validatePayload, (req, 
       const soundPath = `/System/Library/Sounds/${soundName}.aiff`;
 
       exec(`afplay -v ${volume} "${soundPath}"`, (err) => {
-        if (err) console.error('無法播放音效:', err);
+        if (err) logger.error({ error: err.message }, '無法播放音效');
       });
     }
   }
 
-  const endTimestamp = new Date().toLocaleString('zh-TW', {
-    timeZone: 'Asia/Taipei',
-    hour12: false
-  });
-  console.log(`${COLORS.MAGENTA}接收完成時間: ${endTimestamp}${COLORS.RESET}\n`);
+  const forwardResult = await forwardWebhook(req.body);
+  if (!forwardResult.success && forwardResult.error !== 'Forwarding is disabled') {
+    logger.warn({ error: forwardResult.error }, 'Webhook 轉發失敗');
+  }
 
+  logAlert(req.body.status, alerts.length, filteredAlerts.length);
   saveRequest(req, res, req.body);
 
-  res.status(200).json({ status: 'ok', message: 'received' });
+  res.status(200).json({
+    status: 'ok',
+    message: 'received',
+    forwarded: forwardResult.success ? forwardResult.total : 0
+  });
 });
 
 // Error handling middleware
 app.use((err, req, res, _next) => {
-  console.error(`${COLORS.RED}❌ 發生錯誤:${COLORS.RESET}`, err.message);
+  logger.error({ error: err.message, stack: err.stack }, '發生錯誤');
   res.status(400).send('Bad Request');
 });
 
 // Start server if run directly
 if (require.main === module) {
   const server = app.listen(PORT, () => {
-    console.log(`${COLORS.GREEN}伺服器啟動在 http://localhost:${PORT}/test${COLORS.RESET}`);
+    logger.info({ port: PORT }, '伺服器啟動');
   });
 
-  const shutdown = (signal) => {
-    console.log(`${COLORS.YELLOW}收到 ${signal}，正在關閉伺服器...${COLORS.RESET}`);
+  const shutdown = async (signal) => {
+    logger.info({ signal }, '收到關閉訊號，正在關閉伺服器');
     closeDb();
+    await closeRedis();
+    await closeLogger();
     server.close(() => {
-      console.log(`${COLORS.GREEN}伺服器已關閉${COLORS.RESET}`);
+      logger.info('伺服器已關閉');
       process.exit(0);
     });
   };
