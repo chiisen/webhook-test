@@ -267,3 +267,55 @@ npm test
 - [x] 熱重載配置：修改 `.env` 無需重啟伺服器
 - [x] Replay 功能：重新發送歷史請求
 - [x] WebSocket：即時推送 alerts 到前端 UI
+
+---
+
+## 🧠 知識圖譜 (Graphify)
+
+本專案使用 [Graphify](https://github.com/chiisen/graphifyy) 來建立代碼知識圖譜，提升 AI Agent (如 Antigravity) 對專案架構的理解能力。
+
+### 🛠️ 安裝與初始化
+
+1. **安裝套件**：
+   ```bash
+   pip install graphifyy
+   ```
+
+2. **環境初始化**：
+   ```bash
+   # 針對 Gemini/Antigravity 整合
+   graphify gemini install
+
+   # 安裝 Git Hooks (自動在 commit 後更新圖譜)
+   graphify hook install
+   ```
+
+3. **初次建立圖譜**：
+   ```bash
+   # 確保使用正確的 Python 環境 (建議配合 pyenv)
+   $(pyenv which python3) -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"
+   ```
+
+### 🔍 常用指令
+
+- **查詢圖譜**：`graphify query "你的問題"`
+- **手動重建**：使用上述「初次建立圖譜」的 Python 指令。
+- **檢查狀態**：`graphify hook status`
+
+### ❓ 常見問題排除 (Troubleshooting)
+
+#### 1. `pyenv: cannot rehash` (鎖定檔殘留)
+*   **現象**：安裝或更新時報錯 `couldn't acquire lock ... .pyenv-shim`。
+*   **解法**：手動刪除殘留的鎖定檔：
+    ```bash
+    rm ~/.pyenv/shims/.pyenv-shim
+    pyenv rehash
+    ```
+
+#### 2. `ModuleNotFoundError: No module named 'graphify'`
+*   **現象**：執行重建指令時找不到模組。
+*   **原因**：系統預設 `python3` 版本與 `pip` 安裝版本不一致（例如 3.14 vs 3.11.9）。
+*   **解法**：使用 `$(pyenv which python3)` 確保呼叫正確環境下的 Python，或在 `.zshrc` 中正確配置 `eval "$(pyenv init -)"`。
+
+#### 3. 圖譜未自動更新
+*   **解法**：檢查 `graphify-out/` 是否被加入 `.gitignore`（應加入以避免衝突），並確認 `git commit` 是否有觸發 hook 輸出。
